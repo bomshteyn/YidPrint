@@ -97,6 +97,9 @@ export const api = {
   login: (b: { email: string; password: string }) =>
     json<{ user: SessionUser }>('/api/auth/login', 'POST', b),
   logout: () => json<{ ok: true }>('/api/auth/logout', 'POST', {}),
+  changePassword: (b: { current_password: string; new_password: string }) =>
+    json<{ ok: true }>('/api/auth/password', 'POST', b),
+  stats: () => req<{ models: number; creators: number; downloads: number }>('/api/stats'),
 
   listModels: (params: { q?: string; category?: string; sort?: string; page?: number }) => {
     const sp = new URLSearchParams();
@@ -167,3 +170,27 @@ export function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+export function formatCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(n);
+}
+
+export function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '?';
+}
+
+export const LICENSE_DESCRIPTIONS: Record<string, string> = {
+  'CC BY': 'Anyone can use it, including commercially, with credit to you.',
+  'CC BY-SA': 'Like CC BY, but remixes must use the same license.',
+  'CC BY-NC': 'Anyone can use it non-commercially, with credit to you.',
+  'CC BY-NC-SA': 'Non-commercial use only, remixes keep the same license.',
+  CC0: 'Public domain — anyone can use it for anything, no credit needed.',
+  'Personal use only': 'People may print it for themselves; no commercial use or resharing.',
+};

@@ -1,11 +1,14 @@
 <template>
-  <div ref="container" class="relative aspect-[4/3] w-full overflow-hidden rounded-lg bg-zinc-900">
+  <div ref="container" class="relative aspect-square w-full overflow-hidden rounded-2xl bg-zinc-100 outline-1 -outline-offset-1 outline-black/5">
     <div v-if="loading" class="absolute inset-0 flex items-center justify-center text-sm text-zinc-400">
       Loading 3D preview…
     </div>
     <div v-if="error" class="absolute inset-0 flex items-center justify-center text-sm text-zinc-400">
       {{ error }}
     </div>
+    <p v-if="!error" class="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-white/80 px-3 py-1 text-xs text-zinc-500 backdrop-blur">
+      Drag to rotate
+    </p>
   </div>
 </template>
 
@@ -31,7 +34,7 @@ onMounted(async () => {
       const { STLLoader } = await import('three/examples/jsm/loaders/STLLoader.js');
       const geo = await new STLLoader().loadAsync(props.url);
       geo.computeVertexNormals();
-      object = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.6 }));
+      object = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x71717a, roughness: 0.65, metalness: 0.05 }));
     } else if (ext === '3mf') {
       const { ThreeMFLoader } = await import('three/examples/jsm/loaders/3MFLoader.js');
       object = await new ThreeMFLoader().loadAsync(props.url);
@@ -41,8 +44,9 @@ onMounted(async () => {
       object.traverse((child) => {
         if ((child as InstanceType<typeof THREE.Mesh>).isMesh) {
           (child as InstanceType<typeof THREE.Mesh>).material = new THREE.MeshStandardMaterial({
-            color: 0x9ca3af,
-            roughness: 0.6,
+            color: 0x71717a,
+            roughness: 0.65,
+            metalness: 0.05,
           });
         }
       });
@@ -58,17 +62,21 @@ onMounted(async () => {
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x18181b);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
-    const dir = new THREE.DirectionalLight(0xffffff, 1.5);
+    scene.background = new THREE.Color(0xf4f4f5);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xd4d4d8, 1.4));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.6);
     dir.position.set(3, 5, 4);
     scene.add(dir);
     scene.add(object);
 
-    // Auto-fit camera.
+    // Subtle ground grid.
     const box = new THREE.Box3().setFromObject(object);
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const camera = new THREE.PerspectiveCamera(45, 4 / 3, sphere.radius / 100, sphere.radius * 100);
+    const grid = new THREE.GridHelper(sphere.radius * 6, 24, 0xd4d4d8, 0xe4e4e7);
+    grid.position.y = box.min.y - sphere.radius * 0.02;
+    scene.add(grid);
+
+    const camera = new THREE.PerspectiveCamera(45, 1, sphere.radius / 100, sphere.radius * 100);
     camera.position.copy(sphere.center).add(new THREE.Vector3(1, 0.7, 1).normalize().multiplyScalar(sphere.radius * 2.5));
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -102,7 +110,7 @@ onMounted(async () => {
       renderer.dispose();
       renderer.domElement.remove();
     };
-  } catch (e) {
+  } catch {
     error.value = 'Could not load 3D preview.';
     loading.value = false;
   }

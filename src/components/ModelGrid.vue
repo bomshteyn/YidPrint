@@ -1,8 +1,7 @@
 <template>
-  <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+  <ul role="list" class="grid grid-cols-2 gap-x-4 gap-y-8 sm:gap-x-6 md:grid-cols-3 lg:grid-cols-4">
     <ModelCard v-for="m in models" :key="m.id" :model="m" :show-status="showStatus" />
-  </div>
-  <p v-if="!models.length" class="py-8 text-center text-sm text-zinc-500">No models found.</p>
+  </ul>
 </template>
 
 <script setup lang="ts">
