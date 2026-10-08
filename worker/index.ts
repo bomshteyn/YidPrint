@@ -16,6 +16,7 @@ import {
   IMAGE_EXTENSIONS,
   MAX_MODEL_FILE_BYTES,
   MAX_IMAGE_BYTES,
+  contentTypeFor,
 } from './storage';
 
 type Variables = { user: AuthUser | null };
@@ -111,10 +112,6 @@ async function parseBody<T>(c: { req: { json: () => Promise<unknown> } }): Promi
   }
 }
 
-function publicUser(u: AuthUser | UserRow) {
-  return { id: u.id, username: u.username, display_name: u.display_name, role: u.role };
-}
-
 // ---------- auth routes ----------
 
 app.post('/api/auth/register', async (c) => {
@@ -126,6 +123,9 @@ app.post('/api/auth/register', async (c) => {
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return c.json({ error: 'Valid email required' }, 400);
   if (password.length < 8) return c.json({ error: 'Password must be at least 8 characters' }, 400);
   if (!/^[a-zA-Z0-9_-]{2,32}$/.test(username)) return c.json({ error: 'Username must be 2-32 chars of letters, numbers, _ or -' }, 400);
+  // Admin emails are reserved — admins are provisioned out-of-band since
+  // there is no email verification to prove ownership of the address.
+  if (isAdminEmail(c.env, email)) return c.json({ error: 'This email is reserved' }, 403);
 
   const existing = await c.env.DB.prepare('SELECT id FROM users WHERE email = ? OR username = ?')
     .bind(email, username)
@@ -175,9 +175,29 @@ app.get('/api/auth/me', (c) => {
   return c.json({ user: user ?? null });
 });
 
+app.post('/api/auth/password', async (c) => {
+  const user = await requireAuth(c);
+  if (user instanceof Response) return user;
+  const body = await parseBody<{ current_password?: string; new_password?: string }>(c);
+  const next = body.new_password ?? '';
+  if (next.length < 8) return c.json({ error: 'New password must be at least 8 characters' }, 400);
+  const row = await c.env.DB.prepare('SELECT password_hash FROM users WHERE id = ?').bind(user.id).first<UserRow>();
+  if (!row || !(await verifyPassword(body.current_password ?? '', row.password_hash))) {
+    return c.json({ error: 'Current password is incorrect' }, 403);
+  }
+  const token = getCookie(c, SESSION_COOKIE);
+  const currentSessionId = token ? await sha256Hex(token) : null;
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(await hashPassword(next), user.id),
+    // Invalidate every other session for this account.
+    c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').bind(user.id, currentSessionId ?? ''),
+  ]);
+  return c.json({ ok: true });
+});
+
 // ---------- model helpers ----------
 
-function modelSummary(m: ModelRow) {
+function modelSummary(m: ModelRow & { creator_username?: string; creator_display_name?: string }) {
   return {
     id: m.id,
     slug: m.slug,
@@ -190,6 +210,8 @@ function modelSummary(m: ModelRow) {
     created_at: m.created_at,
     published_at: m.published_at,
     cover_url: m.cover_file_id ? `/api/files/${m.cover_file_id}` : null,
+    creator_username: m.creator_username,
+    creator_display_name: m.creator_display_name,
   };
 }
 
@@ -255,28 +277,30 @@ app.get('/api/models', async (c) => {
   const sort = c.req.query('sort') === 'new' ? 'new' : 'popular';
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
 
-  const conds = ["status = 'approved'"];
+  const conds = ["m.status = 'approved'"];
   const params: unknown[] = [];
   if (category) {
-    conds.push('category_slug = ?');
+    conds.push('m.category_slug = ?');
     params.push(category);
   }
   if (q) {
-    conds.push('(title LIKE ? OR description LIKE ? OR tags LIKE ?)');
+    conds.push('(m.title LIKE ? OR m.description LIKE ? OR m.tags LIKE ?)');
     const like = `%${q}%`;
     params.push(like, like, like);
   }
   const where = conds.join(' AND ');
-  const order = sort === 'new' ? 'published_at DESC' : 'downloads_count DESC, likes_count DESC';
+  const order = sort === 'new' ? 'm.published_at DESC' : 'm.downloads_count DESC, m.likes_count DESC';
 
-  const total = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM models WHERE ${where}`)
+  const total = await c.env.DB.prepare(`SELECT COUNT(*) AS n FROM models m WHERE ${where}`)
     .bind(...params)
     .first<{ n: number }>();
   const { results } = await c.env.DB.prepare(
-    `SELECT * FROM models WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`
+    `SELECT m.*, u.username AS creator_username, u.display_name AS creator_display_name
+     FROM models m JOIN users u ON u.id = m.user_id
+     WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`
   )
     .bind(...params, PAGE_SIZE, (page - 1) * PAGE_SIZE)
-    .all<ModelRow>();
+    .all<ModelRow & { creator_username: string; creator_display_name: string }>();
 
   return c.json({
     models: results.map(modelSummary),
@@ -417,7 +441,7 @@ app.post('/api/models/:id/files', async (c) => {
 
   const fileId = crypto.randomUUID();
   const key = `models/${model.id}/${fileId}-${filename}`;
-  const contentType = c.req.header('Content-Type') || 'application/octet-stream';
+  const contentType = contentTypeFor(filename);
   const store = getFileStore(c.env);
   await store.put(key, buf, contentType);
   const sortRow = await c.env.DB.prepare(
@@ -474,14 +498,19 @@ async function serveFile(c: any, download: boolean) {
   const headers: Record<string, string> = {
     'Content-Type': obj.contentType,
     'Content-Length': String(obj.size),
+    'X-Content-Type-Options': 'nosniff',
+    // Files are served on our origin; never let them execute as documents.
+    'Content-Security-Policy': "default-src 'none'; sandbox",
   };
   if (model.status === 'approved') {
     headers['Cache-Control'] = 'public, max-age=31536000, immutable';
   }
-  if (download) {
-    headers['Content-Disposition'] = `attachment; filename="${file.filename.replace(/"/g, '')}"`;
+  const safeName = file.filename.replace(/"/g, '');
+  // Model files always download; only images render inline.
+  if (download || file.kind === 'model') {
+    headers['Content-Disposition'] = `attachment; filename="${safeName}"`;
   } else {
-    headers['Content-Disposition'] = `inline; filename="${file.filename.replace(/"/g, '')}"`;
+    headers['Content-Disposition'] = `inline; filename="${safeName}"`;
   }
   return new Response(obj.body, { headers });
 }
@@ -546,12 +575,20 @@ app.get('/api/categories', async (c) => {
 app.get('/api/users/:username', async (c) => {
   const u = await c.env.DB.prepare('SELECT id, username, display_name, created_at FROM users WHERE username = ?')
     .bind(c.req.param('username'))
-    .first();
+    .first<{ id: string; username: string; display_name: string; created_at: number }>();
   if (!u) return c.json({ error: 'Not found' }, 404);
   const { results } = await c.env.DB.prepare(
-    "SELECT * FROM models WHERE user_id = ? AND status = 'approved' ORDER BY published_at DESC"
-  ).bind((u as { id: string }).id).all<ModelRow>();
+    "SELECT m.*, u.username AS creator_username, u.display_name AS creator_display_name FROM models m JOIN users u ON u.id = m.user_id WHERE m.user_id = ? AND m.status = 'approved' ORDER BY m.published_at DESC"
+  ).bind(u.id).all<ModelRow & { creator_username: string; creator_display_name: string }>();
   return c.json({ user: u, models: results.map(modelSummary) });
+});
+
+app.get('/api/stats', async (c) => {
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS models, COUNT(DISTINCT user_id) AS creators, COALESCE(SUM(downloads_count), 0) AS downloads
+     FROM models WHERE status = 'approved'`
+  ).first<{ models: number; creators: number; downloads: number }>();
+  return c.json(row ?? { models: 0, creators: 0, downloads: 0 });
 });
 
 app.get('/api/me/models', async (c) => {

@@ -4,3 +4,4 @@ dist
 .dev.vars
 *.log
 scripts/seed-assets
+dist-worker

@@ -2,6 +2,7 @@
   "name": "yidprint",
   "main": "worker/index.ts",
   "compatibility_date": "2025-08-01",
+  "account_id": "00599691ff85653bf77da6a5a3c8e2ed",
   "assets": {
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
@@ -10,13 +11,13 @@
     {
       "binding": "DB",
       "database_name": "yidprint",
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "7fd8431e-1e20-4efd-98db-df195d90fe57"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "FILES_KV",
-      "id": "00000000000000000000000000000000"
+      "id": "a5a12990b37240528893bb6ec2ad4f42"
     }
   ],
   // Enable this once R2 is available on the account, then FileStore

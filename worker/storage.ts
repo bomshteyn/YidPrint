@@ -86,3 +86,21 @@ export function extensionOf(name: string): string {
   const i = name.lastIndexOf('.');
   return i === -1 ? '' : name.slice(i + 1).toLowerCase();
 }
+
+// Content type is always derived from the extension — never trust the
+// client's Content-Type header (stored-XSS vector when served inline).
+const CONTENT_TYPES: Record<string, string> = {
+  stl: 'model/stl',
+  '3mf': 'model/3mf',
+  obj: 'model/obj',
+  step: 'model/step',
+  stp: 'model/step',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
+export function contentTypeFor(filename: string): string {
+  return CONTENT_TYPES[extensionOf(filename)] ?? 'application/octet-stream';
+}

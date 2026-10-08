@@ -147,7 +147,18 @@ async function makeModel(who, spec) {
 }
 
 console.log('Registering users…');
-await register('admin', ADMIN_EMAIL, 'mordyb', 'Mordy B');
+// Admins can't self-register (reserved emails 403) — provision via seed-admin.sh.
+execSync(`bash scripts/seed-admin.sh "${ADMIN_EMAIL}" devpassword123 mordyb "Mordy B"`, { cwd: ROOT, stdio: 'inherit' });
+{
+  const res = await fetch(BASE + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: BASE },
+    body: JSON.stringify({ email: ADMIN_EMAIL, password: 'devpassword123' }),
+  });
+  const sc = res.headers.get('set-cookie');
+  if (sc) jars.set('admin', sc.split(';')[0]);
+  if (!res.ok) throw new Error(`admin login: ${res.status} ${await res.text()}`);
+}
 await register('creator', 'creator@yidprint.dev', 'printyid', 'Print Yid');
 
 console.log('Creating approved models…');
