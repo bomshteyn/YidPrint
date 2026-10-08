@@ -1,0 +1,33 @@
+{
+  "name": "yidprint",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-08-01",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yidprint",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "FILES_KV",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  // Enable this once R2 is available on the account, then FileStore
+  // will automatically use R2 instead of KV.
+  // "r2_buckets": [
+  //   {
+  //     "binding": "FILES",
+  //     "bucket_name": "yidprint-files"
+  //   }
+  // ],
+  "vars": {
+    "ADMIN_EMAILS": "mordybstudios@gmail.com"
+  }
+}
